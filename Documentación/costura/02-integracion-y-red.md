@@ -144,3 +144,44 @@ La cámara va en la luminaria y solo recibe PoE. Los botones de causa y la pinza
 | **D. Botonera inalámbrica + nodo con pinza cableado** | Botones a pila por ESP-NOW a la cámara; la pinza en un nodo con alimentación | Botones reubicables sin cable | Pilas y emparejamiento |
 
 **Piloto:** probar A y B en la misma línea, con puestos repartidos en cada ruta. Medir pérdida de paquetes y latencia de los botones. Si B no es fiable, se mantiene A sin cambiar nada más.
+
+## 11. Bus por línea con pasarela (RS-485)
+
+Alternativa a las rutas A–D de la sección 10: todos los nodos de puesto de una línea comparten un cable y una **pasarela** al final de la línea los lleva a la red.
+
+```
+Puesto 1 ─┐
+Puesto 2 ─┤  1 par RS-485 + 24 V (un cable por línea)
+  ...     ├──────────────────────────────> Pasarela ESP32 ──> switch PoE ──> MQTT
+Puesto 25 ┘                                (final de línea)
+```
+
+### Funcionamiento
+- **Nodo de puesto:** lee su pinza y sus botones, guarda las pulsaciones hasta que la pasarela las lea y responde por el bus.
+- **Pasarela:** consulta a los nodos de forma cíclica (protocolo tipo Modbus RTU, 100–200 ms por vuelta), pone la marca de tiempo con NTP y publica en MQTT los mismos tópicos del brief.
+- **Cámara:** sigue solo con PoE, sin recibir datos de los nodos.
+
+### Componentes (⚠️ confirmar ficha y stock)
+| Ítem | Modelo / especificación | Notas |
+|---|---|---|
+| Transceptor RS-485 aislado (por nodo) | p. ej. Analog Devices ADM2587E | Evita lazos de tierra entre máquinas |
+| Convertidor 24 V → 5 V (por nodo) | Módulo buck de 24 V a 5 V, 1 A | Absorbe la caída de tensión del cable |
+| Pasarela | Waveshare ESP32-S3-ETH + transceptor RS-485 + PoE | Ethernet/PoE hacia el switch; WiFi solo de respaldo |
+| Cable de línea | UTP apantallado Cat5e/Cat6: un par para datos, dos pares unidos para 24 V | Máx. ~100 m por tramo |
+| Direccionamiento | Selector DIP de 5 bits (hasta 32 direcciones) | Una dirección por puesto |
+
+### Ventajas y riesgos
+| Ventajas | Riesgos |
+|---|---|
+| ~16 pasarelas en vez de ~400 clientes WiFi; sin AP | Si falla el cable o la pasarela, se cae toda la línea |
+| Inmune al ruido de los motores (señal diferencial) | Caída de tensión: ajustado con 25 nodos en 40–50 m |
+| Alimentación y datos en un solo cable | Firmware por bus: sin OTA por WiFi, hay que desarrollarlo |
+| No depende de la cámara ni de ESP-NOW | Obra: tender y fijar cable por línea |
+
+### Mitigaciones
+- **Falla de línea:** partir la línea en 2 tramos con una pasarela cada uno (~32 pasarelas).
+- **Pulsaciones perdidas:** cola local en el nodo con identificador de evento (`event_id`).
+- **Caída de tensión:** calcular con la corriente real del nodo (medir en el prototipo) y la longitud real de cada línea.
+
+### Piloto
+Montar la línea piloto con el bus (nodos + una pasarela) y comparar con 3–5 puestos por WiFi (ruta A). Medir pérdida de pulsaciones, latencia, tiempo de instalación y costo por puesto antes de decidir para toda la planta.
