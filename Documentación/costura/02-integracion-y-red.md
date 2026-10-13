@@ -131,3 +131,16 @@ El diseño base es **WiFi 2.4 GHz con AP en el techo**. Si la planta tiene mucho
 4. Montar 2 cámaras de prueba (con lente gran angular) y grabar un día completo **solo para calibrar**.
 5. Montar los nodos de máquina de la línea y calibrar la pinza de cada modelo de motor.
 6. Comparar contra el estudio de tiempos manual (semanas 1–2) antes de decidir.
+
+## 10. Cámaras arriba, botones abajo
+
+La cámara va en la luminaria y solo recibe PoE. Los botones de causa y la pinza de corriente van en el **nodo del puesto**, al alcance de la operaria. Rutas para que el dato llegue a MQTT:
+
+| Ruta | Cómo funciona | Ventajas | Riesgos |
+|---|---|---|---|
+| **A. WiFi al AP (base)** | Nodo del puesto (botones + pinza) → WiFi 2.4 GHz → AP PoE → switch. La cámara va aparte por PoE | Independiente de la cámara; ya descrito en la sección 7 | ~400 clientes WiFi; 8–10 AP |
+| **B. ESP-NOW hacia la cámara** | Nodo del puesto → ESP-NOW → cámara ESP32-S3 de arriba (4 puestos) → cable PoE → MQTT | Sin APs ni WiFi de planta; los botones pueden ir a pila | Firmware propio; cobertura con estructura metálica a medir; probar ESP-NOW + Ethernet juntos en el ESP32-S3 |
+| **C. Cable por la columna** | UTP desde la estructura hasta una caja en la mesa | La conexión más confiable | Obra y un cable por puesto |
+| **D. Botonera inalámbrica + nodo con pinza cableado** | Botones a pila por ESP-NOW a la cámara; la pinza en un nodo con alimentación | Botones reubicables sin cable | Pilas y emparejamiento |
+
+**Piloto:** probar A y B en la misma línea, con puestos repartidos en cada ruta. Medir pérdida de paquetes y latencia de los botones. Si B no es fiable, se mantiene A sin cambiar nada más.
