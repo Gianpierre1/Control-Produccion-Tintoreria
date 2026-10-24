@@ -1,6 +1,7 @@
 # Brief técnico: medición de tiempos improductivos en Costura
 
 > Fuente de verdad del proyecto. Lo marcado como **[ABIERTO]** no está decidido y no debe asumirse.
+> **Cambio de enfoque (2026-10-24):** la medición pasa a una app de tablet por costurera; ver [03-app-tablet.md](03-app-tablet.md). Los sensores y cámaras de este brief quedan como alternativa. Las fórmulas (sección 2), el catálogo de causas, los reclamos y la auditoría siguen vigentes.
 > Presentación asociada: *Tiempos_improductivos_Costura_3.pptx* (propuesta A/B/C, octubre 2026).
 > Documentos complementarios: [01-hardware-modelos.md](01-hardware-modelos.md) · [02-integracion-y-red.md](02-integracion-y-red.md)
 
