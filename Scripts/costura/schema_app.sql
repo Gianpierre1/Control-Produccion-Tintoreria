@@ -1,7 +1,7 @@
 -- Esquema de la app de tablet (Documentación/costura/03-app-tablet.md).
--- Se aplica sobre schema.sql: reutiliza operaria, puesto, operacion, causa, parada,
--- resumen_diario, reclamo y auditoria. Las tablas de sensores (lectura_maquina,
--- evento_vision) no son necesarias en este enfoque.
+-- Se aplica sobre schema.sql: reutiliza operaria, puesto, operacion, reclamo y auditoria.
+-- No se usan en este enfoque: lectura_maquina, evento_vision, causa, parada ni resumen_diario
+-- (no hay minutos improductivos; la eficiencia se calcula por operación).
 
 -- Copias sincronizadas desde SQL Server (solo lectura desde el servidor).
 CREATE TABLE orden_produccion (
@@ -55,6 +55,13 @@ CREATE TABLE dispositivo (
     creado      timestamptz NOT NULL DEFAULT now()
 );
 
+-- Motivos de pausa: cada uno tiene un tiempo permitido para volver.
+CREATE TABLE motivo_pausa (
+    codigo       text PRIMARY KEY,
+    descripcion  text    NOT NULL,
+    limite_min   numeric NOT NULL CHECK (limite_min >= 0)
+);
+
 -- Eventos enviados por la tablet. Inmutables; idempotentes por event_id.
 CREATE TABLE evento_tablet (
     event_id              uuid PRIMARY KEY,
@@ -62,14 +69,28 @@ CREATE TABLE evento_tablet (
     dispositivo_id        int         NOT NULL REFERENCES dispositivo(id),
     puesto_id             int         REFERENCES puesto(id),
     tipo                  text        NOT NULL CHECK (tipo IN (
-        'JORNADA_INICIO', 'JORNADA_FIN', 'DESCANSO_INICIO', 'DESCANSO_FIN',
-        'OP_INICIO', 'OP_FIN', 'PARADA_INICIO', 'PARADA_FIN')),
+        'JORNADA_INICIO', 'JORNADA_FIN', 'OP_INICIO', 'OP_FIN', 'PAUSA_INICIO', 'PAUSA_FIN')),
     ts_tablet             timestamptz NOT NULL,           -- hora declarada por la tablet
     ts_servidor           timestamptz NOT NULL DEFAULT now(),
     desfase_reloj_s       real,                           -- tablet vs servidor al enviar
     ticket_operacion_id   bigint      REFERENCES ticket_operacion(id),
-    causa_codigo          text        REFERENCES causa(codigo),
+    motivo_codigo         text        REFERENCES motivo_pausa(codigo),
     piezas                integer     CHECK (piezas >= 0)
 );
 CREATE INDEX ON evento_tablet (operaria_id, ts_tablet);
 CREATE INDEX ON evento_tablet (ticket_operacion_id);
+
+-- Resultado calculado por operación terminada (se recalcula desde los eventos).
+CREATE TABLE resultado_operacion (
+    ticket_operacion_id  bigint  PRIMARY KEY REFERENCES ticket_operacion(id),
+    operaria_id          int     NOT NULL REFERENCES operaria(id),
+    inicio               timestamptz NOT NULL,
+    fin                  timestamptz NOT NULL,
+    piezas               integer NOT NULL,
+    min_transcurridos    numeric NOT NULL,
+    min_pausa_permitida  numeric NOT NULL,
+    min_pausa_exceso     numeric NOT NULL,
+    min_real             numeric NOT NULL,
+    min_asignado         numeric NOT NULL,
+    eficiencia           numeric
+);

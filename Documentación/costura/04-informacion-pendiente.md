@@ -4,12 +4,12 @@
 
 ## 1. Contexto del proyecto
 
-Una planta textil en Perú quiere medir, por costurera y por día, los **minutos trabajados** y los **minutos improductivos** en Costura, para calcular la **eficiencia compensada** y pagar un incentivo.
+Una planta textil en Perú quiere medir, por costurera y por día, la **eficiencia** en Costura (tiempo asignado frente a tiempo real de cada operación) para pagar un incentivo.
 
 - Cada costurera tendrá una **tablet Android** conectada por WiFi a un **servidor local** (sin nube).
 - La costurera inicia sesión con gafete y PIN, **escanea el ticket de un paquete de prendas**, y la tablet le muestra la orden, el color, la talla, la cantidad y las **operaciones** a realizar con su **SMV** (minutos estándar por pieza).
-- Registra inicio y fin de la operación, las piezas hechas y las paradas con su causa.
-- El servidor calcula: `Min. estándar = piezas × SMV`, y `Eficiencia compensada = Min. estándar ÷ (Min. trabajados − Min. improductivos)`.
+- Registra inicio y fin de la operación, las piezas hechas y las pausas con su motivo.
+- **No hay minutos improductivos.** El servidor calcula, por operación, `Tiempo asignado = piezas × SMV` y `Eficiencia = Tiempo asignado ÷ Tiempo real`, donde el tiempo real es el de *Iniciar* a *Terminar* menos las pausas. Cada pausa tiene un motivo con un tiempo permitido para volver; dentro de ese tiempo no cuenta.
 - **Los tickets aún no existen**: los genera el sistema a partir de las órdenes de producción del ERP.
 - Los datos del ERP están en **SQL Server**. El servidor los copiará periódicamente, solo en lectura.
 
@@ -57,11 +57,11 @@ ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;
 | 1 | ¿Un ticket por **paquete** que recorre toda la ruta, o un ticket por **operación**? | Un ticket por paquete (la costurera elige la operación) / un ticket por operación |
 | 2 | ¿Cuántas prendas lleva un paquete? | Número fijo (p. ej. 30) o distinto según estilo |
 | 3 | ¿Cómo se imprimirán los tickets? | Impresora de etiquetas (modelo) / hojas A4 con varios tickets |
-| 4 | ¿Qué paradas **se descuentan** de los minutos trabajados para pagar? | Solo las compensables (material, máquina) / todas las que tengan causa |
-| 5 | Lista de causas de parada y cuáles son compensables | Material, Máquina, Reproceso, Otro, ¿SS.HH.?, ¿permiso?, ¿capacitación? |
-| 6 | ¿Cuánto es la **manipulación del ciclo** aceptable entre operaciones? | 60 a 90 s (propuesto: 90 s) |
-| 7 | ¿Tiempo máximo de hueco sin actividad antes de preguntar la causa? | p. ej. 3 minutos |
-| 8 | ¿Descansos planificados (hora y duración)? | Refrigerio, pausas |
+| 4 | Lista de **motivos de pausa** y el **tiempo permitido** para volver de cada uno | Baño 10 min, falla de máquina 30 min, falta de material, refrigerio 60 min... |
+| 5 | El tiempo permitido, ¿es por cada pausa o acumulado por día y motivo? | Por pausa / acumulado |
+| 6 | Si se pasan del tiempo permitido, ¿qué pasa? | El exceso cuenta como tiempo real (propuesto) / lo valida el supervisor |
+| 7 | ¿Cómo se calcula el **tiempo asignado**? | SMV × piezas / una tabla por tipo de operación y rango de cantidad |
+| 8 | Si olvidan marcar *Terminar*, ¿quién corrige y cómo? | Supervisor con auditoría |
 | 9 | ¿Cómo se identifica la costurera? | PIN, gafete QR, ambos |
 | 10 | ¿Las operaciones se asignan fijas a cada costurera o rota? | Fija / rota |
 
@@ -85,7 +85,7 @@ ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;
 ## 3. Qué haré con las respuestas
 
 1. Con la 2.1: sincronización de órdenes, estilos, rutas, SMV y trabajadoras desde SQL Server a PostgreSQL.
-2. Con la 2.2: ajustar la generación de tickets, la política de minutos improductivos y los umbrales.
+2. Con la 2.2: ajustar la generación de tickets, los motivos de pausa con su tiempo permitido y los umbrales.
 3. Con la 2.3: dimensionar la red, las tablets y el servidor.
 4. Con la 2.4: agregar la sección de privacidad y el procedimiento de reclamos.
 

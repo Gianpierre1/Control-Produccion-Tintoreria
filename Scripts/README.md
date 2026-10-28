@@ -14,7 +14,7 @@ Sistema de tiempos improductivos en Costura:
 - `schema.sql`: esquema PostgreSQL + TimescaleDB (sin validar contra un servidor todavía).
 - `formulas.py`: fórmulas oficiales de eficiencia.
 - `schema_app.sql`: tablas de la app de tablet (órdenes, tickets, dispositivos, eventos).
-- `segmentos.py`: minutos del día a partir de los eventos de la tablet.
+- `operaciones.py`: eficiencia por operación (tiempo asignado ÷ tiempo real) con pausas por motivo.
 - `tickets.py`: códigos de ticket con dígito de control y división en paquetes.
 - `api.py`: API REST de la tablet (FastAPI): dispositivos, sesión con PIN, tickets, eventos idempotentes, resumen del día.
 - `repositorio.py`: almacenamiento en memoria para desarrollo; producción usará PostgreSQL.

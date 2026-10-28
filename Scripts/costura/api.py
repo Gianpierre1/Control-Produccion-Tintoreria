@@ -16,9 +16,8 @@ from typing import Callable, List, Optional
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import AwareDatetime, BaseModel, Field
 
-from formulas import eficiencia_compensada
 from repositorio import Repositorio, verificar_secreto
-from segmentos import TIPOS, Evento, resumen_dia
+from operaciones import TIPOS, Evento, calcular
 from tickets import generar_tickets, validar_codigo
 
 DURACION_SESION = timedelta(hours=12)
@@ -41,7 +40,7 @@ class EventoIn(BaseModel):
     tipo: str
     ts: AwareDatetime
     ticket_operacion_id: Optional[int] = None
-    causa: Optional[str] = None
+    motivo: Optional[str] = None
     piezas: Optional[int] = Field(default=None, ge=0)
 
 
@@ -67,7 +66,6 @@ def crear_app(
     repo: Repositorio,
     admin_token: str,
     ahora: Callable[[], datetime] = lambda: datetime.now(timezone.utc),
-    politica: str = "compensables",
 ) -> FastAPI:
     app = FastAPI(title="Costura · app de tablet", version="1")
 
@@ -123,9 +121,9 @@ def crear_app(
         return {"token": token, "operaria": {"id": op.id, "nombre": op.nombre}, "hora_servidor": t.isoformat()}
 
     # ---------- consulta ----------
-    @app.get("/api/v1/causas")
-    def causas(_s=Depends(sesion)):
-        return [{"codigo": c.codigo, "compensable": c.compensable} for c in repo.causas.values()]
+    @app.get("/api/v1/motivos")
+    def motivos(_s=Depends(sesion)):
+        return [{"codigo": m.codigo, "limite_min": m.limite_min} for m in repo.motivos.values()]
 
     @app.get("/api/v1/tickets/{codigo}")
     def ver_ticket(codigo: str, _s=Depends(sesion)):
@@ -155,13 +153,13 @@ def crear_app(
                 raise HTTPException(422, f"tipo de evento desconocido: {e.tipo}")
             if e.tipo in ("OP_INICIO", "OP_FIN") and e.ticket_operacion_id not in smv:
                 raise HTTPException(422, "ticket_operacion_id desconocido")
-            if e.causa is not None and e.causa not in repo.causas:
-                raise HTTPException(422, f"causa desconocida: {e.causa}")
+            if e.tipo == "PAUSA_INICIO" and e.motivo not in repo.motivos:
+                raise HTTPException(422, f"motivo desconocido: {e.motivo}")
             if e.ts > t + timedelta(minutes=5):
                 raise HTTPException(422, "hora en el futuro; revisar el reloj de la tablet")
         nuevos = duplicados = 0
         for e in lote:
-            ev = Evento(e.event_id, e.tipo, e.ts, e.ticket_operacion_id, e.causa, e.piezas)
+            ev = Evento(e.event_id, e.tipo, e.ts, e.ticket_operacion_id, e.motivo, e.piezas)
             if repo.guardar_evento(ev, s[0], s[1], t):
                 nuevos += 1
             else:
@@ -171,25 +169,23 @@ def crear_app(
     # ---------- resumen ----------
     @app.get("/api/v1/resumen/hoy")
     def resumen_hoy(s=Depends(sesion)):
-        t = ahora()
-        hoy = t.astimezone(TZ_PLANTA).date()
+        hoy = ahora().astimezone(TZ_PLANTA).date()
         evs = [e for e in repo.eventos_de(s[0]) if e.ts.astimezone(TZ_PLANTA).date() == hoy]
         if not evs:
             raise HTTPException(404, "sin eventos hoy")
-        parcial = not any(e.tipo == "JORNADA_FIN" for e in evs)
-        if parcial:
-            evs.append(Evento("sintetico-fin", "JORNADA_FIN", max(t, max(e.ts for e in evs))))
         try:
-            r = resumen_dia(evs, repo.smv_por_ticket_operacion(), repo.causas, politica)
+            r = calcular(evs, repo.smv_por_ticket_operacion(), repo.motivos)
         except ValueError as exc:
             raise HTTPException(409, f"eventos inconsistentes: {exc}") from exc
-        ef = eficiencia_compensada(r.min_estandar, r.min_trabajados, r.min_improductivos)
         return {
-            "parcial": parcial, "piezas": r.piezas,
-            "min_estandar": round(r.min_estandar, 2), "min_trabajados": round(r.min_trabajados, 2),
-            "min_improductivos": round(r.min_improductivos, 2),
-            "min_hueco_sin_causa": round(r.min_hueco_sin_causa, 2),
-            "ef_compensada": None if ef is None else round(ef, 4),
+            "operaciones_terminadas": len(r.operaciones),
+            "operacion_abierta": r.operacion_abierta,
+            "piezas": sum(o.piezas for o in r.operaciones),
+            "min_asignado": round(r.min_asignado, 2),
+            "min_real": round(r.min_real, 2),
+            "eficiencia": None if r.eficiencia is None else round(r.eficiencia, 4),
+            "pausas_con_exceso": [
+                {"motivo": p.motivo, "min_exceso": round(p.min_exceso, 2)} for p in r.pausas_con_exceso],
         }
 
     # ---------- administración de tickets ----------

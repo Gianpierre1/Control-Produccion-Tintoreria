@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from segmentos import Causa, Evento
+from operaciones import Evento, Motivo
 from tickets import TicketNuevo
 
 
@@ -74,7 +74,7 @@ class EventoGuardado:
 
 @dataclass
 class Repositorio:
-    causas: Dict[str, Causa] = field(default_factory=dict)
+    motivos: Dict[str, Motivo] = field(default_factory=dict)
     dispositivos: Dict[int, Dispositivo] = field(default_factory=dict)
     operarias: Dict[int, Operaria] = field(default_factory=dict)
     tickets: Dict[str, Ticket] = field(default_factory=dict)
