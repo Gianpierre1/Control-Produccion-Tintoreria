@@ -154,3 +154,68 @@ def test_eventos_sin_zona_horaria_se_rechazan(contexto):
     r = cli.post("/api/v1/eventos", headers=h,
                  json=[{"event_id": "ev-00000001", "tipo": "JORNADA_INICIO", "ts": "2026-10-26T08:00:00"}])
     assert r.status_code == 422
+
+
+def test_motivos_iniciales_incluyen_reunion_y_se_pueden_agregar_y_dar_de_baja(contexto):
+    from repositorio import MOTIVOS_INICIALES
+    cli, repo, disp = contexto
+    assert "REU" in {m.codigo for m in MOTIVOS_INICIALES}
+    h = {"Authorization": f"Bearer {sesion(cli, disp).json()['token']}"}
+    assert cli.post("/api/v1/motivos", json={"codigo": "CAP", "descripcion": "Capacitación", "limite_min": 45}).status_code == 401
+    r = cli.post("/api/v1/motivos", headers=ADMIN, json={"codigo": "CAP", "descripcion": "Capacitación", "limite_min": 45})
+    assert r.status_code == 201
+    assert cli.post("/api/v1/motivos", headers=ADMIN, json={"codigo": "CAP", "descripcion": "x", "limite_min": 1}).status_code == 409
+    assert "CAP" in {m["codigo"] for m in cli.get("/api/v1/motivos", headers=h).json()}
+    cli.put("/api/v1/motivos/CAP", headers=ADMIN, json={"limite_min": 60})
+    assert repo.motivos["CAP"].limite_min == 60
+    cli.put("/api/v1/motivos/CAP", headers=ADMIN, json={"activo": False})
+    assert "CAP" not in {m["codigo"] for m in cli.get("/api/v1/motivos", headers=h).json()}
+    ts = datetime(2026, 10, 26, 8, 0, tzinfo=TZ).isoformat()
+    r = cli.post("/api/v1/eventos", headers=h, json=[{"event_id": "ev-00000001", "tipo": "PAUSA_INICIO", "ts": ts, "motivo": "CAP"}])
+    assert r.status_code == 422  # un motivo dado de baja ya no se acepta en eventos nuevos
+
+
+def test_tiempo_asignado_sale_de_las_tarifas_por_prenda_operacion_y_cantidad(contexto):
+    cli, repo, disp = contexto
+    for body in [
+        {"operacion_id": 10, "min_por_pieza": 2.0, "cantidad_max": 25},
+        {"operacion_id": 10, "min_por_pieza": 1.8, "cantidad_min": 26},
+        {"operacion_id": 10, "min_por_pieza": 2.6, "tipo_prenda": "Casaca"},
+    ]:
+        assert cli.post("/api/v1/tarifas", headers=ADMIN, json=body).status_code == 201
+    r = cli.post("/api/v1/ordenes/OP-9/tickets", headers=ADMIN, json={
+        "tipo_prenda": "Polo", "lineas": [{"color": "Azul", "talla": "M", "cantidad": 50}], "tam_paquete": 30,
+        "operaciones": [{"operacion_id": 10, "nombre": "Pegar cuello"}]})
+    assert r.status_code == 201
+    smv = [repo.tickets[t["codigo"]].operaciones[0].smv for t in r.json()]
+    assert smv == [1.8, 2.0]            # paquetes de 30 (rango >25) y de 20
+    r = cli.post("/api/v1/ordenes/OP-10/tickets", headers=ADMIN, json={
+        "tipo_prenda": "Casaca", "lineas": [{"color": "Azul", "talla": "M", "cantidad": 20}], "tam_paquete": 30,
+        "operaciones": [{"operacion_id": 10, "nombre": "Pegar cuello"}]})
+    assert repo.tickets[r.json()[0]["codigo"]].operaciones[0].smv == 2.6
+    assert repo.tickets[r.json()[0]["codigo"]].tipo_prenda == "Casaca"
+
+
+def test_cambiar_un_tiempo_no_altera_tickets_ya_emitidos(contexto):
+    cli, repo, _ = contexto
+    tid = cli.post("/api/v1/tarifas", headers=ADMIN, json={"operacion_id": 10, "min_por_pieza": 2.0,
+                                                           "vigente_desde": "2026-01-01"}).json()["id"]
+    body = {"lineas": [{"color": "Azul", "talla": "M", "cantidad": 20}], "tam_paquete": 30,
+            "operaciones": [{"operacion_id": 10, "nombre": "Pegar cuello"}]}
+    viejo = cli.post("/api/v1/ordenes/OP-1/tickets", headers=ADMIN, json=body).json()[0]["codigo"]
+    assert cli.put(f"/api/v1/tarifas/{tid}", headers=ADMIN, json={"vigente_hasta": "2026-10-26"}).status_code == 200
+    cli.post("/api/v1/tarifas", headers=ADMIN, json={"operacion_id": 10, "min_por_pieza": 1.5, "vigente_desde": "2026-10-27"})
+    RELOJ["t"] += timedelta(days=2)
+    nuevo = cli.post("/api/v1/ordenes/OP-2/tickets", headers=ADMIN, json=body).json()[0]["codigo"]
+    assert repo.tickets[viejo].operaciones[0].smv == 2.0
+    assert repo.tickets[nuevo].operaciones[0].smv == 1.5
+
+
+def test_sin_tarifa_ni_smv_no_se_crean_tickets_ni_se_consume_la_secuencia(contexto):
+    cli, repo, _ = contexto
+    antes = repo.proxima_secuencia_ticket()
+    r = cli.post("/api/v1/ordenes/OP-1/tickets", headers=ADMIN, json={
+        "lineas": [{"color": "Azul", "talla": "M", "cantidad": 20}], "tam_paquete": 30,
+        "operaciones": [{"operacion_id": 77, "nombre": "Sin tarifa"}]})
+    assert r.status_code == 422
+    assert repo.tickets == {} and repo.proxima_secuencia_ticket() == antes

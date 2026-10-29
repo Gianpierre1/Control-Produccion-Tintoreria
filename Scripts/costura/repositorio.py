@@ -14,7 +14,20 @@ from datetime import datetime
 from typing import Dict, List, Optional
 
 from operaciones import Evento, Motivo
+from tarifas import Tarifa
 from tickets import TicketNuevo
+
+
+# Motivos de pausa iniciales. Los tiempos permitidos son PROVISIONALES: confirmar con la planta.
+# Se pueden agregar, cambiar o dar de baja desde la API de administración (/api/v1/motivos).
+MOTIVOS_INICIALES = [
+    Motivo("BAN", 10, "Baño"),
+    Motivo("MAQ", 30, "Falla de máquina"),
+    Motivo("MAT", 20, "Falta de material"),
+    Motivo("REF", 60, "Refrigerio"),
+    Motivo("REU", 30, "Reunión"),
+    Motivo("OTR", 10, "Otro"),
+]
 
 
 def hash_secreto(valor: str, sal: Optional[bytes] = None) -> str:
@@ -62,6 +75,7 @@ class Ticket:
     cantidad: int
     operaciones: List[OperacionTicket]
     estado: str = "activo"  # activo | anulado
+    tipo_prenda: Optional[str] = None
 
 
 @dataclass
@@ -75,6 +89,7 @@ class EventoGuardado:
 @dataclass
 class Repositorio:
     motivos: Dict[str, Motivo] = field(default_factory=dict)
+    tarifas: Dict[int, Tarifa] = field(default_factory=dict)
     dispositivos: Dict[int, Dispositivo] = field(default_factory=dict)
     operarias: Dict[int, Operaria] = field(default_factory=dict)
     tickets: Dict[str, Ticket] = field(default_factory=dict)
@@ -84,6 +99,7 @@ class Repositorio:
     _sig_ticket: int = 1
     _sig_oper_ticket: int = 1
     _sig_dispositivo: int = 1
+    _sig_tarifa: int = 1
 
     # --- dispositivos ---
     def registrar_dispositivo(self, nombre: str) -> tuple[Dispositivo, str]:
@@ -109,19 +125,30 @@ class Repositorio:
         return next((o for o in self.operarias.values() if o.gafete == gafete), None)
 
     # --- tickets ---
+    def agregar_tarifa(self, t: Tarifa) -> int:
+        id_ = self._sig_tarifa
+        self._sig_tarifa += 1
+        self.tarifas[id_] = t
+        return id_
+
+    def proxima_secuencia_ticket(self) -> int:
+        return self._sig_ticket
+
     def siguiente_secuencia_ticket(self, cantidad: int) -> int:
         inicio = self._sig_ticket
         self._sig_ticket += cantidad
         return inicio
 
-    def guardar_tickets(self, nuevos: List[TicketNuevo], operaciones: List[dict]) -> List[Ticket]:
+    def guardar_tickets(
+        self, nuevos: List[TicketNuevo], ops_por_ticket: List[List[dict]], tipo_prenda: Optional[str] = None
+    ) -> List[Ticket]:
         guardados = []
-        for t in nuevos:
+        for t, operaciones in zip(nuevos, ops_por_ticket):
             ops = []
             for i, op in enumerate(operaciones, start=1):
                 ops.append(OperacionTicket(self._sig_oper_ticket, i, op["operacion_id"], op["nombre"], op["smv"]))
                 self._sig_oper_ticket += 1
-            tk = Ticket(t.codigo, t.orden, t.color, t.talla, t.cantidad, ops)
+            tk = Ticket(t.codigo, t.orden, t.color, t.talla, t.cantidad, ops, tipo_prenda=tipo_prenda)
             self.tickets[tk.codigo] = tk
             guardados.append(tk)
         return guardados

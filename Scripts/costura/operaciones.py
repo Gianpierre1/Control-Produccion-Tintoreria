@@ -33,6 +33,8 @@ class Evento:
 class Motivo:
     codigo: str
     limite_min: float  # tiempo permitido para volver de una pausa con este motivo
+    descripcion: str = ""
+    activo: bool = True  # un motivo dado de baja deja de ofrecerse, pero los eventos antiguos se siguen calculando
 
 
 @dataclass

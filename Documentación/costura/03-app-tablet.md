@@ -8,8 +8,8 @@
 
 No hay minutos improductivos. Cada operación de un ticket tiene un **tiempo asignado** y la eficiencia depende de qué tan rápido la terminó la costurera.
 
-- **Tiempo asignado** = piezas hechas × SMV de la operación (lo asigna el sistema según tipo de operación y cantidad).
-- **Pausas:** hay motivos de parada (por ejemplo baño o falla de máquina). La costurera pausa la operación con un botón en la tablet y elige el motivo. **Cada motivo tiene un tiempo permitido para volver.** Si regresa dentro de ese tiempo, la pausa no cuenta: el reloj de la operación se detiene y continúa.
+- **Tiempo asignado** = piezas hechas × minutos por pieza. Los minutos por pieza salen de una **tabla de tarifas** según el **tipo de operación**, la **cantidad de prendas** del ticket y el **tipo de prenda** (ver sección 6).
+- **Pausas:** hay motivos de parada (baño, falla de máquina, falta de material, refrigerio, reunión, otro; se pueden agregar más). La costurera pausa la operación con un botón en la tablet y elige el motivo. **Cada motivo tiene un tiempo permitido para volver, y aplica a cada pausa por separado.** Si regresa dentro de ese tiempo, la pausa no cuenta: el reloj de la operación se detiene y continúa.
 - **Exceso:** si se pasa del tiempo permitido, el exceso cuenta como tiempo real. *(Política por confirmar.)*
 - **Tiempo real** = tiempo entre *Iniciar* y *Terminar* − pausas dentro de lo permitido.
 - **Eficiencia de la operación** = tiempo asignado ÷ tiempo real. Más de 100 % = terminó antes de lo asignado.
@@ -59,7 +59,10 @@ Autenticación: cada tablet se registra una vez (el administrador la aprueba y r
 | `POST /api/v1/dispositivos` | Registrar una tablet (pendiente de aprobación) |
 | `POST /api/v1/sesion` | Iniciar sesión (gafete o PIN); devuelve token y hora del servidor |
 | `GET  /api/v1/tickets/{codigo}` | Datos del ticket y operaciones pendientes |
-| `GET  /api/v1/motivos` | Motivos de pausa y su tiempo permitido |
+| `GET  /api/v1/motivos` | Motivos de pausa activos y su tiempo permitido |
+| `POST/PUT /api/v1/motivos` | (administración) Agregar un motivo, cambiar su tiempo o darlo de baja |
+| `POST/GET /api/v1/tarifas` | (administración) Crear y listar tarifas de tiempo asignado |
+| `PUT  /api/v1/tarifas/{id}` | (administración) Cerrar la vigencia de una tarifa |
 | `POST /api/v1/eventos` | Enviar un lote de eventos (idempotente por `event_id`) |
 | `GET  /api/v1/resumen/hoy` | Resumen del día de la costurera |
 | `POST /api/v1/reclamos` | Reclamar un segmento |
@@ -81,7 +84,10 @@ POST /api/v1/eventos
 
 | Concepto | Regla |
 |---|---|
-| Tiempo asignado | piezas × SMV del ticket-operación |
+| Tiempo asignado | piezas × minutos por pieza del ticket-operación (valor tomado de la tarifa al emitir el ticket) |
+| Tarifa | La más específica que aplica: tipo de prenda exacto, rango de cantidad más angosto, vigencia más reciente; sin tarifa o ambigua, no se emite el ticket |
+| Cambiar un tiempo | Se cierra la vigencia de la tarifa y se crea otra; los tickets ya emitidos no cambian |
+| Motivos | Se agregan, cambian o se dan de baja por la API de administración; los eventos antiguos con un motivo dado de baja se siguen calculando |
 | Pausa dentro del permitido | No cuenta (se descuenta del tiempo real) |
 | Pausa fuera del permitido | El exceso cuenta como tiempo real y se marca para el supervisor |
 | Operación sin terminar | No entra en la eficiencia; aparece como operación abierta |
@@ -123,10 +129,9 @@ Candidatas ⚠️ (confirmar disponibilidad, precio y soporte en Perú): Samsung
 
 - [ ] **SQL Server:** nombres de las tablas o vistas de órdenes de producción, estilos, colores, tallas, rutas de operaciones y SMV; usuario de solo lectura.
 - [ ] Un ticket por prenda o por operación; tamaño de paquete.
-- [ ] **Motivos de pausa y su tiempo permitido** (por ejemplo baño, falla de máquina, falta de material, refrigerio).
-- [ ] El tiempo permitido ¿es por cada pausa o acumulado por día y motivo?
+- [ ] **Confirmar los tiempos permitidos** de los motivos iniciales (los actuales son provisionales: baño 10, falla de máquina 30, falta de material 20, refrigerio 60, reunión 30, otro 10 minutos).
 - [ ] Qué pasa con el exceso: ¿cuenta como tiempo real, o lo valida el supervisor?
-- [ ] Cómo se calcula el tiempo asignado: ¿SMV × piezas, o una tabla por operación y rango de cantidad?
+- [ ] Valores reales de la tabla de tarifas: minutos por pieza por operación, tipo de prenda y rango de cantidad (¿existen en el ERP?).
 - [ ] Impresora de etiquetas o impresión en hojas.
 - [ ] Modelo de tablet y cantidad para el piloto.
 - [ ] Cómo se identifica a la costurera: PIN, gafete QR o ambos.

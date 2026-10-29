@@ -57,10 +57,10 @@ ORDER BY TABLE_SCHEMA, TABLE_NAME, ORDINAL_POSITION;
 | 1 | ¿Un ticket por **paquete** que recorre toda la ruta, o un ticket por **operación**? | Un ticket por paquete (la costurera elige la operación) / un ticket por operación |
 | 2 | ¿Cuántas prendas lleva un paquete? | Número fijo (p. ej. 30) o distinto según estilo |
 | 3 | ¿Cómo se imprimirán los tickets? | Impresora de etiquetas (modelo) / hojas A4 con varios tickets |
-| 4 | Lista de **motivos de pausa** y el **tiempo permitido** para volver de cada uno | Baño 10 min, falla de máquina 30 min, falta de material, refrigerio 60 min... |
-| 5 | El tiempo permitido, ¿es por cada pausa o acumulado por día y motivo? | Por pausa / acumulado |
+| 4 | **Tiempo permitido** de cada motivo de pausa (ya incluidos: baño, falla de máquina, falta de material, refrigerio, reunión, otro; con tiempos provisionales) | Confirmar o corregir cada uno; ¿faltan motivos? |
+| 5 | ~~Tiempo permitido por pausa o acumulado~~ | **Resuelto:** es por cada pausa |
 | 6 | Si se pasan del tiempo permitido, ¿qué pasa? | El exceso cuenta como tiempo real (propuesto) / lo valida el supervisor |
-| 7 | ¿Cómo se calcula el **tiempo asignado**? | SMV × piezas / una tabla por tipo de operación y rango de cantidad |
+| 7 | **Tabla de tiempo asignado**: minutos por pieza por operación, tipo de prenda y rango de cantidad (**resuelto:** depende de los tres; falta la tabla real) | ¿Existe en el ERP? ¿En qué tabla? |
 | 8 | Si olvidan marcar *Terminar*, ¿quién corrige y cómo? | Supervisor con auditoría |
 | 9 | ¿Cómo se identifica la costurera? | PIN, gafete QR, ambos |
 | 10 | ¿Las operaciones se asignan fijas a cada costurera o rota? | Fija / rota |

@@ -10,14 +10,16 @@ from __future__ import annotations
 
 import hmac
 import secrets
-from datetime import datetime, timedelta, timezone
+from dataclasses import replace
+from datetime import date, datetime, timedelta, timezone
 from typing import Callable, List, Optional
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import AwareDatetime, BaseModel, Field
 
+from operaciones import TIPOS, Evento, Motivo, calcular
 from repositorio import Repositorio, verificar_secreto
-from operaciones import TIPOS, Evento, calcular
+from tarifas import SinTarifa, Tarifa, buscar_tarifa
 from tickets import generar_tickets, validar_codigo
 
 DURACION_SESION = timedelta(hours=12)
@@ -53,13 +55,40 @@ class LineaIn(BaseModel):
 class OperacionIn(BaseModel):
     operacion_id: int
     nombre: str
-    smv: float = Field(gt=0)
+    smv: Optional[float] = Field(default=None, gt=0)  # si falta, se usa la tarifa vigente
 
 
 class GenerarTicketsIn(BaseModel):
     lineas: List[LineaIn] = Field(min_length=1)
     tam_paquete: int = Field(gt=0)
     operaciones: List[OperacionIn] = Field(min_length=1)
+    tipo_prenda: Optional[str] = None
+
+
+class MotivoIn(BaseModel):
+    codigo: str = Field(min_length=2, max_length=10, pattern=r"^[A-Z0-9_]+$")
+    descripcion: str = Field(min_length=1, max_length=80)
+    limite_min: float = Field(ge=0)
+
+
+class MotivoCambio(BaseModel):
+    descripcion: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    limite_min: Optional[float] = Field(default=None, ge=0)
+    activo: Optional[bool] = None
+
+
+class TarifaIn(BaseModel):
+    operacion_id: int
+    min_por_pieza: float = Field(gt=0)
+    tipo_prenda: Optional[str] = None
+    cantidad_min: int = Field(default=1, ge=1)
+    cantidad_max: Optional[int] = Field(default=None, ge=1)
+    vigente_desde: Optional[date] = None
+    vigente_hasta: Optional[date] = None
+
+
+class TarifaCierre(BaseModel):
+    vigente_hasta: date
 
 
 def crear_app(
@@ -123,7 +152,8 @@ def crear_app(
     # ---------- consulta ----------
     @app.get("/api/v1/motivos")
     def motivos(_s=Depends(sesion)):
-        return [{"codigo": m.codigo, "limite_min": m.limite_min} for m in repo.motivos.values()]
+        return [{"codigo": m.codigo, "descripcion": m.descripcion, "limite_min": m.limite_min}
+                for m in repo.motivos.values() if m.activo]
 
     @app.get("/api/v1/tickets/{codigo}")
     def ver_ticket(codigo: str, _s=Depends(sesion)):
@@ -135,7 +165,7 @@ def crear_app(
         if t.estado == "anulado":
             raise HTTPException(409, "ticket anulado")
         return {
-            "codigo": t.codigo, "orden": t.orden, "color": t.color, "talla": t.talla, "cantidad": t.cantidad,
+            "codigo": t.codigo, "orden": t.orden, "tipo_prenda": t.tipo_prenda, "color": t.color, "talla": t.talla, "cantidad": t.cantidad,
             "operaciones": [
                 {"ticket_operacion_id": o.id, "secuencia": o.secuencia, "operacion_id": o.operacion_id,
                  "nombre": o.nombre, "smv": o.smv} for o in t.operaciones],
@@ -153,7 +183,7 @@ def crear_app(
                 raise HTTPException(422, f"tipo de evento desconocido: {e.tipo}")
             if e.tipo in ("OP_INICIO", "OP_FIN") and e.ticket_operacion_id not in smv:
                 raise HTTPException(422, "ticket_operacion_id desconocido")
-            if e.tipo == "PAUSA_INICIO" and e.motivo not in repo.motivos:
+            if e.tipo == "PAUSA_INICIO" and not (e.motivo in repo.motivos and repo.motivos[e.motivo].activo):
                 raise HTTPException(422, f"motivo desconocido: {e.motivo}")
             if e.ts > t + timedelta(minutes=5):
                 raise HTTPException(422, "hora en el futuro; revisar el reloj de la tablet")
@@ -188,15 +218,77 @@ def crear_app(
                 {"motivo": p.motivo, "min_exceso": round(p.min_exceso, 2)} for p in r.pausas_con_exceso],
         }
 
+    # ---------- administración de motivos de pausa ----------
+    @app.post("/api/v1/motivos", status_code=201, dependencies=[Depends(admin)])
+    def crear_motivo(body: MotivoIn):
+        if body.codigo in repo.motivos:
+            raise HTTPException(409, "ya existe un motivo con ese código")
+        repo.motivos[body.codigo] = Motivo(body.codigo, body.limite_min, body.descripcion)
+        return {"codigo": body.codigo, "descripcion": body.descripcion, "limite_min": body.limite_min, "activo": True}
+
+    @app.put("/api/v1/motivos/{codigo}", dependencies=[Depends(admin)])
+    def cambiar_motivo(codigo: str, body: MotivoCambio):
+        m = repo.motivos.get(codigo)
+        if m is None:
+            raise HTTPException(404, "motivo no encontrado")
+        cambios = {k: v for k, v in body.model_dump().items() if v is not None}
+        m = replace(m, **cambios)
+        repo.motivos[codigo] = m
+        return {"codigo": m.codigo, "descripcion": m.descripcion, "limite_min": m.limite_min, "activo": m.activo}
+
+    # ---------- administración de tarifas (tiempo asignado) ----------
+    @app.post("/api/v1/tarifas", status_code=201, dependencies=[Depends(admin)])
+    def crear_tarifa(body: TarifaIn):
+        try:
+            t = Tarifa(body.operacion_id, body.min_por_pieza, body.tipo_prenda, body.cantidad_min,
+                       body.cantidad_max, body.vigente_desde or ahora().astimezone(TZ_PLANTA).date(),
+                       body.vigente_hasta)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"id": repo.agregar_tarifa(t)}
+
+    @app.get("/api/v1/tarifas", dependencies=[Depends(admin)])
+    def listar_tarifas():
+        return [{"id": i, "operacion_id": t.operacion_id, "tipo_prenda": t.tipo_prenda,
+                 "cantidad_min": t.cantidad_min, "cantidad_max": t.cantidad_max,
+                 "min_por_pieza": t.min_por_pieza, "vigente_desde": t.vigente_desde.isoformat(),
+                 "vigente_hasta": t.vigente_hasta.isoformat() if t.vigente_hasta else None}
+                for i, t in repo.tarifas.items()]
+
+    @app.put("/api/v1/tarifas/{id}", dependencies=[Depends(admin)])
+    def cerrar_tarifa(id: int, body: TarifaCierre):
+        """Una tarifa no se edita: se cierra su vigencia y se crea otra con el tiempo nuevo."""
+        t = repo.tarifas.get(id)
+        if t is None:
+            raise HTTPException(404, "tarifa no encontrada")
+        try:
+            repo.tarifas[id] = replace(t, vigente_hasta=body.vigente_hasta)
+        except ValueError as exc:
+            raise HTTPException(422, str(exc)) from exc
+        return {"id": id, "vigente_hasta": body.vigente_hasta.isoformat()}
+
     # ---------- administración de tickets ----------
     @app.post("/api/v1/ordenes/{orden}/tickets", status_code=201, dependencies=[Depends(admin)])
     def crear_tickets(orden: str, body: GenerarTicketsIn):
-        total = sum(
-            -(-l.cantidad // body.tam_paquete) for l in body.lineas)  # paquetes, redondeando hacia arriba
-        inicio = repo.siguiente_secuencia_ticket(total)
+        fecha = ahora().astimezone(TZ_PLANTA).date()
+        inicio = repo.proxima_secuencia_ticket()
         nuevos = generar_tickets(orden, [(l.color, l.talla, l.cantidad) for l in body.lineas],
                                  body.tam_paquete, inicio)
-        guardados = repo.guardar_tickets(nuevos, [o.model_dump() for o in body.operaciones])
+        ops_por_ticket = []
+        for t in nuevos:  # se resuelve el tiempo de cada ticket antes de guardar nada
+            ops = []
+            for o in body.operaciones:
+                smv = o.smv
+                if smv is None:
+                    try:
+                        smv = buscar_tarifa(repo.tarifas.values(), o.operacion_id, body.tipo_prenda,
+                                            t.cantidad, fecha).min_por_pieza
+                    except (SinTarifa, ValueError) as exc:
+                        raise HTTPException(422, str(exc)) from exc
+                ops.append({"operacion_id": o.operacion_id, "nombre": o.nombre, "smv": smv})
+            ops_por_ticket.append(ops)
+        repo.siguiente_secuencia_ticket(len(nuevos))
+        guardados = repo.guardar_tickets(nuevos, ops_por_ticket, body.tipo_prenda)
         return [{"codigo": g.codigo, "color": g.color, "talla": g.talla, "cantidad": g.cantidad} for g in guardados]
 
     @app.post("/api/v1/tickets/{codigo}/anular", dependencies=[Depends(admin)])
